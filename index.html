@@ -36,6 +36,8 @@ h3{font-size:16px;margin-bottom:5px}
 p{color:var(--muted);margin-bottom:13px}
 .hero p:not(.kicker){color:#e7f4f2;max-width:50ch}
 .cta{display:inline-flex;position:relative;z-index:1;background:var(--gold);color:#172c39;border-radius:8px;font-size:14px;font-weight:750;text-decoration:none;padding:9px 13px}
+.hero-actions{display:flex;flex-wrap:wrap;gap:8px}
+.cta.teacher{background:#fff;color:#173a51}
 .columns{display:grid;grid-template-columns:minmax(0,1.28fr) minmax(0,1fr);gap:15px;margin:17px 0 22px}
 .card{padding:clamp(15px,3vw,25px);border:1px solid var(--line);background:var(--paper);border-radius:14px;min-width:0}
 .month{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 10px}
@@ -70,7 +72,10 @@ footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;border
     <p class="kicker">Sekolah Kebangsaan Ranggu &middot; Sesi 2027</p>
     <h1>e-Direct Kokum</h1>
     <p>Paparan awam untuk takwim dan maklumat kokurikulum Sekolah Kebangsaan Ranggu.</p>
-    <a class="cta" href="#takwim">Lihat takwim</a>
+    <div class="hero-actions">
+      <a class="cta" href="#takwim">Lihat takwim</a>
+      <a class="cta teacher" href="https://script.google.com/macros/s/AKfycbyvDV9HSOkItuMPACnmS6dqaliVjlfNgmdCu24ou0w-Ob2FABKSPsrqkL3kEVswlaNi/exec">Log Masuk Guru</a>
+    </div>
   </section>
   <div class="columns">
     <section id="takwim" class="card" aria-labelledby="calendar-heading">
