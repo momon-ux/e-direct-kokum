@@ -181,6 +181,10 @@ footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wra
 #admin input, #admin select { max-width: 420px; }
 #admin input[type="file"] { display: block; width: 100%; margin: 5px 0; }
 #gate form { max-width: 430px; }
+#email-options { max-width: 430px; margin-top: 24px; }
+#email-options summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+#email-options form { margin-top: 14px; }
+.login-help { color: var(--muted); font-size: .9rem; max-width: 430px; }
 #gate label + label { margin-top: 9px; }
 #gate #sign-in, #gate #reset-password, #gate-sign-out { margin-top: 12px; }
 #teacher-admin { margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--edge); }
@@ -204,6 +208,12 @@ footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wra
   <section class="panel" id="gate" aria-labelledby="gate-title">
     <h1 id="gate-title">Log Masuk Guru</h1>
     <p id="gate-message" role="status">Menyemak sesi…</p>
+    <div id="quick-login" hidden>
+      <button id="sign-in" class="button primary" type="button" disabled>Masuk dengan Google</button>
+      <p class="login-help">Pilih akaun Google sendiri. Tidak perlu cipta kata laluan baharu.</p>
+    </div>
+    <details id="email-options" hidden>
+      <summary>Pilihan e-mel lain</summary>
     <form id="login-form" hidden>
       <label>E-mel<input id="login-email" type="email" required maxlength="254" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
       <label>Kata laluan<input id="login-password" type="password" required autocomplete="current-password"></label>
@@ -212,8 +222,8 @@ footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wra
         <button class="button" id="register-link" type="button">Daftar sendiri</button>
       </div>
       <button class="button" id="reset-password" type="button">Lupa kata laluan</button>
-      <button id="sign-in" class="button" type="button" disabled>Log masuk Google</button>
     </form>
+    </details>
     <form id="register-form" hidden>
       <label>Nama penuh guru<input id="register-name" type="text" required minlength="2" maxlength="100" autocomplete="name"></label>
       <label>E-mel pilihan<input id="register-email" type="email" required maxlength="254" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
@@ -229,7 +239,7 @@ footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wra
     </div>
     <form id="enrollment-form" hidden>
       <label>Nama penuh guru<input id="teacher-name" required maxlength="100" autocomplete="name"></label>
-      <label>Kod sementara sekolah<input id="enrollment-code" type="password" required minlength="8" maxlength="100" autocomplete="off"></label>
+      <label>Kod sekolah · kali pertama sahaja<input id="enrollment-code" type="password" required minlength="8" maxlength="100" autocomplete="off"></label>
       <div class="actions"><button class="button primary" id="enroll-button" type="submit">Aktifkan akses guru</button></div>
       <p id="enrollment-status" role="status"></p>
     </form>
@@ -452,6 +462,9 @@ function clearDirectory() {
 }
 function showGate(message, mode = 'login') {
   $('gate').hidden = false;
+  $('quick-login').hidden = mode !== 'login';
+  $('email-options').hidden = mode !== 'login';
+  if (mode !== 'login') $('email-options').open = false;
   $('login-form').hidden = mode !== 'login';
   $('register-form').hidden = mode !== 'register';
   $('verification').hidden = mode !== 'verify';
@@ -460,7 +473,7 @@ function showGate(message, mode = 'login') {
   status('gate-message', message);
 }
 
-const loginMessage = 'Gunakan e-mel pilihan dan kata laluan. Guru baharu boleh daftar sendiri.';
+const loginMessage = 'Masuk dengan akaun Google untuk membuka Carian Murid.';
 const verificationMessage = 'Buka pautan pengesahan dalam e-mel, kemudian kembali ke halaman ini.';
 $('register-link').addEventListener('click', () => {
   $('register-email').value = $('login-email').value;
@@ -678,7 +691,17 @@ async function observeUser(user) {
     return;
   }
   const sessionUser = user.uid;
-  const reference = passwordAccount ? doc(teacherProfiles, sessionUser) : accessRef(email);
+  let legacyAccount = false;
+  if (!passwordAccount) {
+    try {
+      legacyAccount = (await getDocFromServer(accessRef(email))).exists();
+    } catch {
+      if (starting === generation) showGate('Akses belum dapat disemak. Semak sambungan internet dan cuba lagi.', 'signed');
+      return;
+    }
+  }
+  if (starting !== generation || auth.currentUser?.uid !== sessionUser) return;
+  const reference = legacyAccount ? accessRef(email) : doc(teacherProfiles, sessionUser);
   stopWatching = onSnapshot(reference, { includeMetadataChanges: true }, snapshot => {
     if (auth.currentUser?.uid !== sessionUser) return;
     if (snapshot.metadata.fromCache) {
@@ -692,16 +715,15 @@ async function observeUser(user) {
     }
     if (snapshot.metadata.hasPendingWrites) return;
     const access = snapshot.data();
-    const role = passwordAccount ? (access?.status === 'active' && access.email === email ? 'teacher' : '') : (access?.active && ['admin', 'teacher'].includes(access.role) ? access.role : '');
+    const role = legacyAccount ? (access?.active && ['admin', 'teacher'].includes(access.role) ? access.role : '') : (access?.status === 'active' && access.email === email ? 'teacher' : '');
     if (!role) {
       generation++;
       permission = '';
       clearDirectory();
-      if (passwordAccount && !access) {
+      if (!legacyAccount && !access) {
         $('teacher-name').value ||= user.displayName || '';
-        showGate('Masukkan kod sementara sekolah untuk mengaktifkan akses kali pertama.', 'enroll');
-      } else if (passwordAccount) showGate('Akses akaun ini dinyahaktifkan. Hubungi pentadbir SK Ranggu.', 'signed');
-      else showGate('Akaun Google ini belum diberikan akses oleh pentadbir SK Ranggu.', 'signed');
+        showGate('Sahkan nama dan masukkan kod sekolah sekali sahaja. Selepas ini, terus masuk dengan Google.', 'enroll');
+      } else showGate('Akses akaun ini dinyahaktifkan. Hubungi pentadbir SK Ranggu.', 'signed');
       return;
     }
     if (role === permission) return;
@@ -711,7 +733,7 @@ async function observeUser(user) {
     $('gate').hidden = true;
     $('portal').hidden = false;
     $('admin').hidden = role !== 'admin';
-    status('session-email', (passwordAccount ? access.nama : email) + (role === 'admin' ? ' · Pentadbir' : ''));
+    status('session-email', (legacyAccount ? email : access.nama) + (role === 'admin' ? ' · Pentadbir' : ''));
     if (role === 'admin') {
       watchTeacherAccounts(current);
       watchInvitation(current);
