@@ -237,12 +237,6 @@ footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wra
       <button class="button primary" id="check-verification" type="button">Saya sudah sahkan e-mel</button>
       <button class="button" id="resend-verification" type="button">Hantar semula pautan</button>
     </div>
-    <form id="enrollment-form" hidden>
-      <label>Nama penuh guru<input id="teacher-name" required maxlength="100" autocomplete="name"></label>
-      <label>Kod sekolah · kali pertama sahaja<input id="enrollment-code" type="password" required minlength="8" maxlength="100" autocomplete="off"></label>
-      <div class="actions"><button class="button primary" id="enroll-button" type="submit">Aktifkan akses guru</button></div>
-      <p id="enrollment-status" role="status"></p>
-    </form>
     <button id="gate-sign-out" class="button" type="button" hidden>Keluar</button>
   </section>
   <section class="panel" id="portal" aria-labelledby="portal-title" hidden>
@@ -272,14 +266,7 @@ footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wra
     </form>
     <div id="teacher-admin">
       <h3>Pendaftaran dan akses guru</h3>
-      <form id="invitation-form">
-        <label>Kod sementara sekolah<input id="invitation-code" type="password" required minlength="8" maxlength="100" autocomplete="off"></label>
-        <p id="invitation-state" role="status"></p>
-        <div class="actions">
-          <button class="button primary" type="submit">Aktifkan kod selama 24 jam</button>
-          <button class="button" id="close-invitation" type="button">Tutup kod</button>
-        </div>
-      </form>
+      <p>Guru baharu muncul secara automatik selepas log masuk Google. Tekan Aktifkan guru untuk mengesahkan guru sekolah.</p>
       <label>Cari guru<input id="teacher-filter" type="search" autocomplete="off"></label>
       <p id="teacher-status" role="status"></p>
       <ul id="teacher-list" class="teacher-list"></ul>
@@ -396,16 +383,9 @@ function loginAddress(value) {
   return /^[^@/\s]+@[^@/\s]+[.][^@/\s]+$/.test(email) && email.length <= 254 ? email : '';
 }
 
-async function invitationDigest(value) {
-  const code = value.trim();
-  if (code.length < 8 || code.length > 100) return '';
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
-  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.2.0/firebase-app.js';
 import { browserPopupRedirectResolver, browserSessionPersistence, createUserWithEmailAndPassword, GoogleAuthProvider, initializeAuth, onAuthStateChanged, reload, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile } from 'https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js';
-import { collection, doc, getDocFromServer, initializeFirestore, memoryLocalCache, onSnapshot, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/13.2.0/firebase-firestore.js';
+import { collection, doc, getDocFromServer, initializeFirestore, memoryLocalCache, onSnapshot, serverTimestamp, setDoc, updateDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/13.2.0/firebase-firestore.js';
 
 const firebaseConfig = {"apiKey": "AIzaSyBefhDlwBhgIW1whIQV-SMEnHOAno2p2mM", "authDomain": "e-direct-kokum-sk-ranggu.firebaseapp.com", "projectId": "e-direct-kokum-sk-ranggu", "appId": "1:623454101645:web:33d47509e122906e1242c4", "messagingSenderId": "623454101645"};
 const app = initializeApp(firebaseConfig);
@@ -415,7 +395,6 @@ const roster = doc(db, 'sesi', '2027');
 const classRef = key => doc(roster, 'kelas', key);
 const accessRef = email => doc(db, 'guru', email);
 const teacherProfiles = collection(db, 'akaunGuru');
-const invitation = doc(db, 'tetapanGuru', 'jemputan');
 const $ = id => document.getElementById(id);
 
 let permission = '';
@@ -423,7 +402,6 @@ let generation = 0;
 let students = [];
 let stopWatching = () => {};
 let stopTeacherList = () => {};
-let stopInvitation = () => {};
 let teacherAccounts = [];
 
 function status(id, message) {
@@ -446,19 +424,15 @@ function clearDirectory() {
   $('import-form').reset();
   stopTeacherList();
   stopTeacherList = () => {};
-  stopInvitation();
-  stopInvitation = () => {};
   teacherAccounts = [];
   $('teacher-filter').value = '';
   $('teacher-list').replaceChildren();
-  $('invitation-form').reset();
   $('import-button').disabled = false;
   status('session-email', '');
   status('directory-status', '');
   status('match-status', '');
   status('import-status', '');
   status('teacher-status', '');
-  status('invitation-state', '');
 }
 function showGate(message, mode = 'login') {
   $('gate').hidden = false;
@@ -468,7 +442,6 @@ function showGate(message, mode = 'login') {
   $('login-form').hidden = mode !== 'login';
   $('register-form').hidden = mode !== 'register';
   $('verification').hidden = mode !== 'verify';
-  $('enrollment-form').hidden = mode !== 'enroll';
   $('gate-sign-out').hidden = mode === 'login' || mode === 'register';
   status('gate-message', message);
 }
@@ -665,8 +638,6 @@ async function observeUser(user) {
   clearDirectory();
   $('login-password').value = '';
   $('register-password').value = '';
-  $('enrollment-form').reset();
-  status('enrollment-status', '');
   if (!user) {
     showGate(loginMessage);
     $('sign-in').disabled = false;
@@ -702,6 +673,25 @@ async function observeUser(user) {
   }
   if (starting !== generation || auth.currentUser?.uid !== sessionUser) return;
   const reference = legacyAccount ? accessRef(email) : doc(teacherProfiles, sessionUser);
+  if (!legacyAccount) {
+    try {
+      const profile = await getDocFromServer(reference);
+      if (starting !== generation || auth.currentUser?.uid !== sessionUser) return;
+      if (!profile.exists()) {
+        const nama = (user.displayName?.trim() || 'Guru ' + email.split('@')[0]).slice(0, 100);
+        try {
+          await setDoc(reference, { nama: nama.length >= 2 ? nama : 'Guru ' + nama, email, status: 'pending', createdAt: serverTimestamp() });
+        } catch (error) {
+          // Another tab may have registered this same account while this request was in flight.
+          if (!(await getDocFromServer(reference)).exists()) throw error;
+        }
+      }
+    } catch {
+      if (starting === generation) showGate('Pendaftaran belum dapat disimpan. Semak internet dan cuba masuk semula.', 'signed');
+      return;
+    }
+  }
+  if (starting !== generation || auth.currentUser?.uid !== sessionUser) return;
   stopWatching = onSnapshot(reference, { includeMetadataChanges: true }, snapshot => {
     if (auth.currentUser?.uid !== sessionUser) return;
     if (snapshot.metadata.fromCache) {
@@ -720,10 +710,9 @@ async function observeUser(user) {
       generation++;
       permission = '';
       clearDirectory();
-      if (!legacyAccount && !access) {
-        $('teacher-name').value ||= user.displayName || '';
-        showGate('Sahkan nama dan masukkan kod sekolah sekali sahaja. Selepas ini, terus masuk dengan Google.', 'enroll');
-      } else showGate('Akses akaun ini dinyahaktifkan. Hubungi pentadbir SK Ranggu.', 'signed');
+      if (!legacyAccount && access?.status === 'pending') {
+        showGate('Pendaftaran cikgu sudah diterima. Pentadbir sekolah akan mengaktifkan akaun ini. Halaman ini akan terbuka secara automatik selepas diaktifkan.', 'signed');
+      } else showGate('Akaun ini belum diaktifkan. Hubungi pentadbir SK Ranggu.', 'signed');
       return;
     }
     if (role === permission) return;
@@ -736,7 +725,6 @@ async function observeUser(user) {
     status('session-email', (legacyAccount ? email : access.nama) + (role === 'admin' ? ' · Pentadbir' : ''));
     if (role === 'admin') {
       watchTeacherAccounts(current);
-      watchInvitation(current);
     }
     loadDirectory(current).catch(() => {
       if (current === generation) status('directory-status', 'Rekod tidak dapat dimuatkan. Muat semula halaman untuk cuba lagi.');
@@ -794,34 +782,6 @@ $('import-form').addEventListener('submit', async event => {
     if (current === generation) $('import-button').disabled = students.length === 552;
   }
 });
-$('enrollment-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  const user = auth.currentUser;
-  const email = loginAddress(user?.email || '');
-  const nama = $('teacher-name').value.trim();
-  if (!email || !user?.emailVerified || permission) return;
-  if (nama.length < 2 || nama.length > 100) {
-    status('enrollment-status', 'Masukkan nama penuh guru.');
-    return;
-  }
-  $('enroll-button').disabled = true;
-  try {
-    const inviteDigest = await invitationDigest($('enrollment-code').value);
-    if (!inviteDigest) {
-      status('enrollment-status', 'Semak kod sementara sekolah.');
-      return;
-    }
-    if (auth.currentUser?.uid !== user.uid) return;
-    await setDoc(doc(teacherProfiles, user.uid), { nama, email, status: 'active', createdAt: serverTimestamp(), inviteDigest });
-    if (auth.currentUser?.uid === user.uid) $('enrollment-code').value = '';
-  } catch (error) {
-    if (auth.currentUser?.uid === user.uid) status('enrollment-status', error.code === 'permission-denied'
-      ? 'Kod sementara tidak sah, sudah tamat atau ditutup. Semak dengan pentadbir.' : 'Pendaftaran belum dapat disimpan. Cuba lagi.');
-  } finally {
-    $('enroll-button').disabled = false;
-  }
-});
-
 function renderTeacherList() {
   const list = $('teacher-list');
   const query = $('teacher-filter').value.trim().toLocaleLowerCase('ms');
@@ -833,7 +793,7 @@ function renderTeacherList() {
     list.append(item);
     return;
   }
-  const labels = { active: 'Aktif', disabled: 'Dinyahaktifkan' };
+  const labels = { pending: 'Menunggu pengaktifan', active: 'Aktif', disabled: 'Dinyahaktifkan' };
   for (const account of matches) {
     const item = document.createElement('li');
     const details = document.createElement('div');
@@ -845,7 +805,7 @@ function renderTeacherList() {
     const control = document.createElement('button');
     control.type = 'button';
     control.className = 'button';
-    control.textContent = account.status === 'active' ? 'Nyahaktifkan' : 'Aktifkan semula';
+    control.textContent = account.status === 'active' ? 'Nyahaktifkan' : account.status === 'pending' ? 'Aktifkan guru' : 'Aktifkan semula';
     control.setAttribute('aria-label', control.textContent + ' ' + account.nama);
     control.addEventListener('click', async () => {
       if (permission !== 'admin') return;
@@ -876,41 +836,6 @@ function watchTeacherAccounts(current) {
 }
 $('teacher-filter').addEventListener('input', renderTeacherList);
 
-function watchInvitation(current) {
-  stopInvitation = onSnapshot(invitation, { includeMetadataChanges: true }, snapshot => {
-    if (current !== generation || snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) return;
-    const invite = snapshot.data();
-    const expires = invite?.expiresAt?.toDate();
-    const open = invite?.digest && expires > new Date();
-    status('invitation-state', open ? 'Kod dibuka sehingga ' + new Intl.DateTimeFormat('ms-MY', {
-      dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kuching',
-    }).format(expires) + ' (waktu Malaysia).' : 'Kod sementara ditutup atau sudah tamat.');
-  }, () => {
-    if (current === generation) status('invitation-state', 'Status kod belum dapat disemak.');
-  });
-}
-async function saveInvitation(close) {
-  if (permission !== 'admin') return;
-  const current = generation;
-  try {
-    const digest = close ? '' : await invitationDigest($('invitation-code').value);
-    if (!close && !digest) {
-      status('invitation-state', 'Kod perlu mengandungi sekurang-kurangnya 8 aksara.');
-      return;
-    }
-    if (current !== generation) return;
-    if (!close && !window.confirm('Aktifkan kod selama 24 jam? Sesiapa yang memiliki kod dan mengesahkan e-mel boleh mendaftar untuk melihat rekod murid.')) return;
-    await setDoc(invitation, { digest, expiresAt: close ? serverTimestamp() : Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) });
-    if (current === generation) $('invitation-form').reset();
-  } catch {
-    if (current === generation) status('invitation-state', 'Tetapan kod belum dapat disimpan. Cuba lagi.');
-  }
-}
-$('invitation-form').addEventListener('submit', event => {
-  event.preventDefault();
-  saveInvitation(false);
-});
-$('close-invitation').addEventListener('click', () => saveInvitation(true));
 
 </script>
 </body>
